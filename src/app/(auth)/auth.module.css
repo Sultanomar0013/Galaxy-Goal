@@ -1,0 +1,135 @@
+.wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 32px 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.brand {
+  font-family: Georgia, serif;
+  font-size: 1.6rem;
+  font-weight: normal;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.subtitle {
+  color: var(--dim);
+  text-align: center;
+  font-size: 0.9rem;
+  margin: 6px 0 24px;
+}
+
+.form {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+
+.field input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  outline: none;
+}
+.field input:focus {
+  border-color: var(--accent);
+}
+
+.error {
+  color: var(--high);
+  font-size: 0.8rem;
+}
+
+.errorList {
+  color: var(--high);
+  font-size: 0.8rem;
+  padding-left: 18px;
+}
+
+.banner {
+  background: rgba(255, 93, 93, 0.1);
+  border: 1px solid rgba(255, 93, 93, 0.4);
+  color: #ff9d9d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.notice {
+  background: rgba(109, 255, 176, 0.08);
+  border: 1px solid rgba(109, 255, 176, 0.35);
+  color: var(--done);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+}
+
+.field input.code {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 1.5rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  padding-left: calc(12px + 0.5em);
+}
+
+.gapTop {
+  margin-top: 16px;
+}
+
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.linkButton:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.linkButton:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+.submit {
+  margin-top: 6px;
+  background: var(--accent);
+  color: #0b0d1a;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.switch {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--dim);
+}

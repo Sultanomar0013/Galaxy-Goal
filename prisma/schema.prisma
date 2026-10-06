@@ -1,0 +1,383 @@
+// Goal Galaxy database schema (MySQL / MariaDB)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SUPERADMIN
+}
+
+enum Importance {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum Timeframe {
+  SHORT
+  MID
+  LONG
+}
+
+enum GoalStatus {
+  ONGOING
+  DONE
+  NOT_DONE
+}
+
+model User {
+  id              String    @id @default(cuid())
+  name            String    @db.VarChar(100)
+  email           String    @unique @db.VarChar(191)
+  passwordHash    String    @db.VarChar(100)
+  role            Role      @default(USER)
+  isActive        Boolean   @default(true)
+  // null until the user enters the code emailed to them; unverified users can't log in
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  // last time the app was open; a connection's rift dims the longer they've been away
+  lastSeenAt      DateTime?
+  // set when the user shares a read-only link to their galaxy (/g/<slug>)
+  publicSlug      String?   @unique @db.VarChar(40)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  goals    Goal[]
+  sessions Session[]
+  otps     EmailOtp[]
+
+  sentConnections     Connection[] @relation("requester")
+  receivedConnections Connection[] @relation("addressee")
+
+  createdMultiverses Multiverse[]       @relation("multiverseCreator")
+  multiverses        MultiverseMember[]
+  milestonesDone     Milestone[]        @relation("milestoneDoneBy")
+  changeRequests     ChangeRequest[]
+  mvActivity         MvActivity[]
+
+  stepsSuggested GoalStep[]          @relation("stepSuggestedBy")
+  goalNotes      GoalNote[]          @relation("noteAuthor")
+  goalShares     GoalShare[]         @relation("goalSharedWith")
+  visitsMade     Visit[]             @relation("visitor")
+  visitsReceived Visit[]             @relation("host")
+  mentors        Mentorship[]        @relation("mentee")
+  mentees        Mentorship[]        @relation("mentor")
+  friendGroups   FriendGroup[]
+  inGroups       FriendGroupMember[]
+  pushSubs       PushSub[]
+}
+
+enum ConnectionStatus {
+  PENDING
+  ACCEPTED
+}
+
+// A connect request from requester to addressee. Declining, cancelling or disconnecting deletes the row,
+// so either side can ask again later. One row per pair, in whichever direction it was first sent.
+model Connection {
+  id          String           @id @default(cuid())
+  requesterId String
+  requester   User             @relation("requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addresseeId String
+  addressee   User             @relation("addressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  status      ConnectionStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  respondedAt DateTime?
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId])
+}
+
+// One-time codes for email verification. Only a hash of the code is stored; a user has
+// at most one live code, and it dies after too many wrong guesses or when it expires.
+model EmailOtp {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String   @db.Char(64)
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Browser sessions. The cookie holds a random token; only its SHA-256 hash is stored here,
+// so a leaked database can't be used to log in, and sessions can be revoked server-side.
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique @db.Char(64)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Goal {
+  id         String     @id @default(cuid())
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String     @db.VarChar(200)
+  category   String     @default("General") @db.VarChar(100)
+  importance Importance @default(MEDIUM)
+  timeframe  Timeframe  @default(SHORT)
+  targetDate DateTime   @db.Date
+  status     GoalStatus @default(ONGOING)
+  notes      String?    @db.MediumText // sanitised rich-text HTML
+  isPrivate  Boolean    @default(false) // private goals are never shown to connections
+  // when true (and not private), only the connections listed in `shares` see it
+  limited    Boolean    @default(false)
+  why        String?    @db.VarChar(500) // why it matters; shown when the goal is overdue
+  // a letter to your future self, sealed until the goal is done or its date arrives
+  capsule    String?    @db.Text
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  steps     GoalStep[]
+  guestNotes GoalNote[]
+  shares    GoalShare[]
+  linksFrom GoalLink[] @relation("linkFrom")
+  linksTo   GoalLink[] @relation("linkTo")
+
+  @@index([userId])
+}
+
+// A sub-goal, drawn as a moon around its planet. A mentor's suggestion waits (pending) until the
+// goal's owner accepts it.
+model GoalStep {
+  id            String    @id @default(cuid())
+  goalId        String
+  goal          Goal      @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  title         String    @db.VarChar(200)
+  position      Int
+  doneAt        DateTime?
+  pending       Boolean   @default(false)
+  suggestedById String?
+  suggestedBy   User?     @relation("stepSuggestedBy", fields: [suggestedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+
+  @@index([goalId])
+}
+
+// Two of a user's goals pulling on each other ("save money" feeds "buy a house").
+model GoalLink {
+  id     String @id @default(cuid())
+  fromId String
+  from   Goal   @relation("linkFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId   String
+  to     Goal   @relation("linkTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+  @@index([toId])
+}
+
+// A guestbook note a connection leaves on a goal; drawn as a comet orbiting the planet.
+model GoalNote {
+  id        String    @id @default(cuid())
+  goalId    String
+  goal      Goal      @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation("noteAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  text      String    @db.VarChar(280)
+  createdAt DateTime  @default(now())
+  readAt    DateTime? // when the goal's owner saw it
+
+  @@index([goalId, createdAt])
+}
+
+// Who may see a `limited` goal.
+model GoalShare {
+  goalId String
+  goal   Goal   @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation("goalSharedWith", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([goalId, userId])
+  @@index([userId])
+}
+
+// The latest time each connection visited someone's solar system (their footprints).
+model Visit {
+  visitorId String
+  visitor   User     @relation("visitor", fields: [visitorId], references: [id], onDelete: Cascade)
+  hostId    String
+  host      User     @relation("host", fields: [hostId], references: [id], onDelete: Cascade)
+  at        DateTime @default(now())
+
+  @@id([visitorId, hostId])
+  @@index([hostId, at])
+}
+
+// The owner lets a connection mentor them: comment on and suggest steps for their goals.
+model Mentorship {
+  ownerId   String
+  owner     User     @relation("mentee", fields: [ownerId], references: [id], onDelete: Cascade)
+  mentorId  String
+  mentor    User     @relation("mentor", fields: [mentorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([ownerId, mentorId])
+  @@index([mentorId])
+}
+
+// A user's own grouping of their connections; each group's rifts sit together as a cluster.
+model FriendGroup {
+  id        String              @id @default(cuid())
+  ownerId   String
+  owner     User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String              @db.VarChar(40)
+  color     String              @db.VarChar(7)
+  createdAt DateTime            @default(now())
+  members   FriendGroupMember[]
+
+  @@index([ownerId])
+}
+
+model FriendGroupMember {
+  groupId String
+  group   FriendGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+}
+
+// A browser that asked for push notifications (web push, used when the user has no tab open).
+model PushSub {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique @db.VarChar(600)
+  p256dh    String   @db.VarChar(200)
+  auth      String   @db.VarChar(100)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------- Multiverse: one goal shared by up to 5 connected people ----------
+
+enum MemberStatus {
+  INVITED
+  ACTIVE
+}
+
+enum ChangeKind {
+  GOAL_UPDATE
+  MILESTONE_ADD
+  MILESTONE_EDIT
+  MILESTONE_DELETE
+  MILESTONE_DONE
+  MILESTONE_UNDONE
+}
+
+enum ChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Multiverse {
+  id         String     @id @default(cuid())
+  creatorId  String
+  creator    User       @relation("multiverseCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  name       String     @db.VarChar(200)
+  category   String     @default("General") @db.VarChar(100)
+  importance Importance @default(MEDIUM)
+  targetDate DateTime   @db.Date
+  status     GoalStatus @default(ONGOING)
+  notes      String?    @db.MediumText // sanitised rich-text HTML
+  // set when every milestone (or the goal itself) is done; the multiverse becomes a star in members' skies
+  completedAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  members    MultiverseMember[]
+  milestones Milestone[]
+  changes    ChangeRequest[]
+  activity   MvActivity[]
+
+  @@index([creatorId])
+}
+
+// The creator is an ACTIVE member too. Each member keeps one colour for their moon and milestone bands.
+model MultiverseMember {
+  id           String       @id @default(cuid())
+  multiverseId String
+  multiverse   Multiverse   @relation(fields: [multiverseId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status       MemberStatus @default(INVITED)
+  color        String       @db.VarChar(7)
+  invitedAt    DateTime     @default(now())
+  joinedAt     DateTime?
+
+  @@unique([multiverseId, userId])
+  @@index([userId])
+}
+
+model Milestone {
+  id           String     @id @default(cuid())
+  multiverseId String
+  multiverse   Multiverse @relation(fields: [multiverseId], references: [id], onDelete: Cascade)
+  title        String     @db.VarChar(200)
+  position     Int
+  doneAt       DateTime?
+  // credited to whoever proposed the completion, even when the creator approved it
+  doneById     String?
+  doneBy       User?      @relation("milestoneDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+
+  @@index([multiverseId])
+}
+
+// A member's proposed edit, waiting for the creator. The creator's own edits apply directly and aren't stored.
+model ChangeRequest {
+  id           String       @id @default(cuid())
+  multiverseId String
+  multiverse   Multiverse   @relation(fields: [multiverseId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  kind         ChangeKind
+  milestoneId  String? // no foreign key: the milestone may be deleted while this waits
+  payload      Json
+  status       ChangeStatus @default(PENDING)
+  createdAt    DateTime     @default(now())
+  decidedAt    DateTime?
+
+  @@index([multiverseId, status])
+}
+
+enum ActivityKind {
+  CREATED
+  JOINED
+  LEFT
+  MILESTONE_ADDED
+  MILESTONE_DONE
+  COMPLETED
+}
+
+// The multiverse's history, shown as the activity trail. `text` keeps the milestone title or goal name
+// as it was, so entries still read correctly after renames, deletions or the actor leaving.
+model MvActivity {
+  id           String       @id @default(cuid())
+  multiverseId String
+  multiverse   Multiverse   @relation(fields: [multiverseId], references: [id], onDelete: Cascade)
+  actorId      String?
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  kind         ActivityKind
+  text         String       @db.VarChar(200)
+  createdAt    DateTime     @default(now())
+
+  @@index([multiverseId, createdAt])
+}
